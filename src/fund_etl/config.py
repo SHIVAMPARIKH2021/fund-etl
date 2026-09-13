@@ -27,6 +27,7 @@ class Settings(BaseSettings):
 
     # Optional defaults
     sec_base_url: str = "https://www.sec.gov/files/dera/data/mutual-fund-prospectus-risk/return-summary-data-sets"
+    ticker_url: str = "https://www.sec.gov/files/company_tickers_mf.json"
     batch_size: int = 250_000
     log_level: str = "INFO"
 
