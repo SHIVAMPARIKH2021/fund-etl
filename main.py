@@ -1,6 +1,7 @@
 import argparse
 import logging
 from fund_etl.extract.extract import download_and_extract_quarter, scan_tsv_lazy, stream_batches
+from fund_etl.extract.extract_ticker import sync_mutual_fund_tickers
 from fund_etl.load.load import bulk_copy_dataframe
 from fund_etl.transform.transform import (
     transform_calculations,
@@ -88,6 +89,11 @@ def run_pipeline(year: int, quarter: int, force: bool = False) -> None:
         logger.info("Ingesting Calculations (cal.tsv)...")
         cal_df = transform_calculations(scan_tsv_lazy(q_dir / "cal.tsv").collect())
         bulk_copy_dataframe(cal_df, "sec_financials.calculation_relationships", CAL_COLS)
+
+    # 7. Company tickers
+    logger.info("Ingesting Company ticker (company_ticker_mf.json)...")
+    sync_mutual_fund_tickers()
+
 
     logger.info("ETL pipeline complete for %dq%d.", year, quarter)
 
