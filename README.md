@@ -1,4 +1,7 @@
-## Example Run Command
+## Fund ETL Job
+- This job loads Mutual Fund data into Postgresql database.
+
+### Example Run Command
 
 - Step-1
 ```Bash
