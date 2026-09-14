@@ -11,7 +11,5 @@ wheels/
 # Environment files
 .env
 # Data files
-data/
-data/raw/
 *.tsv
 *.zip

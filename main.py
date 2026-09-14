@@ -1,5 +1,9 @@
 import argparse
 import logging
+import os
+import shutil
+from pathlib import Path as Path
+from fund_etl.config import RAW_DATA_DIR, PROCESSED_DATA_DIR
 from fund_etl.extract.extract import download_and_extract_quarter, scan_tsv_lazy, stream_batches
 from fund_etl.extract.extract_ticker import sync_mutual_fund_tickers
 from fund_etl.load.load import bulk_copy_dataframe
@@ -40,7 +44,7 @@ LAB_COLS = ["adsh", "tag", "version", "std", "terse", "verbose", "total", "negat
 CAL_COLS = ["adsh", "grp", "arc", "negative", "ptag", "pversion", "ctag", "cversion"]
 
 
-def run_pipeline(year: int, quarter: int, force: bool = False) -> None:
+def run_pipeline(year: int, quarter: int, is_ticker_mf:bool, force: bool = False) -> None:
     logger.info("Executing SEC Fund Prospectus ETL for %dq%d", year, quarter)
     q_dir = download_and_extract_quarter(year, quarter, force_download=force)
 
@@ -91,18 +95,57 @@ def run_pipeline(year: int, quarter: int, force: bool = False) -> None:
         bulk_copy_dataframe(cal_df, "sec_financials.calculation_relationships", CAL_COLS)
 
     # 7. Company tickers
-    logger.info("Ingesting Company ticker (company_ticker_mf.json)...")
-    sync_mutual_fund_tickers()
+    if is_ticker_mf:
+        print(f"Value of is_ticker_mf:{is_ticker_mf}")
+        logger.info("Ingesting Company ticker (company_ticker_mf.json)...")
+        sync_mutual_fund_tickers()
 
+    #8 Directory cleanup
+    logger.info("Copying metadata to processed and cleaning up the raw data...")
+    copy_metadata_and_clean_directory(RAW_DATA_DIR, PROCESSED_DATA_DIR)
 
     logger.info("ETL pipeline complete for %dq%d.", year, quarter)
+
+def copy_metadata_and_clean_directory(source: Path, destination: Path):
+    """Function to move a directory to another directory"""
+    if not source.is_dir():
+        raise FileNotFoundError(f"Source directory not found: {source}")
+    if not source.exists():
+        raise FileNotFoundError(f"Source directory does not exists: {source}")
+    if not destination.is_dir():
+        raise FileNotFoundError(f"Destination directory already exists: {destination}")
+    if not destination.exists():
+        raise FileNotFoundError(f"Destination directory does not exists: {destination}")
+
+    for directory in source.iterdir():
+        full_source_path = os.path.join(source, directory)
+        full_destination_path = os.path.join(destination, directory.parts[-1])
+        if Path(full_source_path).is_dir():
+            for file in Path(full_source_path).iterdir():
+                if file.is_file() and (file.name.endswith("json")) or (file.name.endswith("htm")):
+                    if not Path(full_destination_path).is_dir() and not Path(full_destination_path).exists():
+                        os.mkdir(full_destination_path)
+                    shutil.copy(file, full_destination_path)
+        shutil.rmtree(full_source_path)
+
+def str_to_bool(value):
+    if isinstance(value, bool):
+        return value
+    if value.lower() in ('true', 't', 'yes', 'y', '1'):
+        return True
+    elif value.lower() in ('false', 'f', 'no', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError("Boolean value expected (True/False).")
+
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SEC Fund Prospectus ETL")
     parser.add_argument("--year", type=int, required=True, help="Year (e.g. 2026)")
     parser.add_argument("--quarter", type=int, choices=[1, 2, 3, 4], required=True, help="Quarter (1-4)")
+    parser.add_argument("--ticker", type=str_to_bool, required=True, help="Ticker MF (True/False)")
     parser.add_argument("--force", action="store_true", help="Force re-download")
     args = parser.parse_args()
 
-    run_pipeline(year=args.year, quarter=args.quarter, force=args.force)
+    run_pipeline(year=args.year, quarter=args.quarter,  is_ticker_mf=args.ticker, force=args.force)
