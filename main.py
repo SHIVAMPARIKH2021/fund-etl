@@ -2,6 +2,7 @@ import argparse
 import logging
 import os
 import shutil
+import traceback
 from pathlib import Path as Path
 from fund_etl.config import RAW_DATA_DIR, PROCESSED_DATA_DIR
 from fund_etl.extract.extract import download_and_extract_quarter, scan_tsv_lazy, stream_batches
@@ -14,6 +15,11 @@ from fund_etl.transform.transform import (
     transform_submissions,
     transform_tags,
     transform_text_disclosures,
+)
+from fund_etl.load.pipeline_log import (
+    start_pipeline_execution,
+    mark_pipeline_success,
+    mark_pipeline_failed,
 )
 
 logging.basicConfig(
@@ -46,65 +52,99 @@ CAL_COLS = ["adsh", "grp", "arc", "negative", "ptag", "pversion", "ctag", "cvers
 
 def run_pipeline(year: int, quarter: int, is_ticker_mf:bool, force: bool = False) -> None:
     logger.info("Executing SEC Fund Prospectus ETL for %dq%d", year, quarter)
-    q_dir = download_and_extract_quarter(year, quarter, force_download=force)
 
-    # 1. Submissions (PK: adsh)
-    logger.info("Ingesting Submissions (sub.tsv)...")
-    sub_df = transform_submissions(scan_tsv_lazy(q_dir / "sub.tsv").collect())
-    bulk_copy_dataframe(
-        sub_df, 
-        "sec_financials.submissions", 
-        SUB_COLS, 
-        conflict_columns=["adsh"]
-    )
+    # 1. Initialize execution tracking in sec_financials.pipeline_execution_log
+    log_id = start_pipeline_execution(year, quarter)
+    total_records = 0
 
-    # 2. Taxonomy Tags (PK: tag, version)
-    logger.info("Ingesting Taxonomy Tags (tag.tsv)...")
-    tag_df = transform_tags(scan_tsv_lazy(q_dir / "tag.tsv").collect())
-    bulk_copy_dataframe(
-        tag_df, 
-        "sec_financials.taxonomy_tags", 
-        TAG_COLS, 
-        conflict_columns=["tag", "version"]
-    )
+    try:
+        q_dir = download_and_extract_quarter(year, quarter, force_download=force)
 
-    # 3. Numeric Facts (No unique constraint in ELT staging, keep direct COPY)
-    logger.info("Streaming Numeric Facts (num.tsv)...")
-    for idx, raw_chunk in enumerate(stream_batches(q_dir / "num.tsv", batch_size=200_000)):
-        clean_chunk = transform_numeric_facts(raw_chunk)
-        rows = bulk_copy_dataframe(clean_chunk, "sec_financials.numeric_facts", NUM_COLS)
-        logger.info("num.tsv chunk %d ingested: %d rows", idx, rows)
+        # 2. Submissions (PK: adsh)
+        logger.info("Ingesting Submissions (sub.tsv)...")
+        sub_df = transform_submissions(scan_tsv_lazy(q_dir / "sub.tsv").collect())
+        rows = bulk_copy_dataframe(
+                sub_df,
+                "sec_financials.submissions",
+                SUB_COLS,
+                conflict_columns=["adsh"]
+            )
+        total_records += rows
 
-    # 4. Text Disclosures
-    if (q_dir / "txt.tsv").exists():
-        logger.info("Streaming Text Disclosures (txt.tsv)...")
-        for idx, raw_chunk in enumerate(stream_batches(q_dir / "txt.tsv", batch_size=100_000)):
-            clean_chunk = transform_text_disclosures(raw_chunk)
-            bulk_copy_dataframe(clean_chunk, "sec_financials.text_disclosures", TXT_COLS)
+        # 3. Taxonomy Tags (PK: tag, version)
+        logger.info("Ingesting Taxonomy Tags (tag.tsv)...")
+        tag_df = transform_tags(scan_tsv_lazy(q_dir / "tag.tsv").collect())
+        rows = bulk_copy_dataframe(
+                tag_df,
+                "sec_financials.taxonomy_tags",
+                TAG_COLS,
+                conflict_columns=["tag", "version"]
+            )
+        total_records += rows
 
-    # 5. Labels (includes "verbose")
-    if (q_dir / "lab.tsv").exists():
-        logger.info("Ingesting Presentation Labels (lab.tsv)...")
-        lab_df = transform_labels(scan_tsv_lazy(q_dir / "lab.tsv").collect())
-        bulk_copy_dataframe(lab_df, "sec_financials.presentation_labels", LAB_COLS)
+        # 4. Numeric Facts (No unique constraint in ELT staging, keep direct COPY)
+        logger.info("Streaming Numeric Facts (num.tsv)...")
+        for idx, raw_chunk in enumerate(stream_batches(q_dir / "num.tsv", batch_size=200_000)):
+            clean_chunk = transform_numeric_facts(raw_chunk)
+            rows = bulk_copy_dataframe(
+                    clean_chunk,
+                    "sec_financials.numeric_facts",
+                    NUM_COLS)
+            total_records += rows
+            logger.info("num.tsv chunk %d ingested: %d rows", idx, rows)
 
-    # 6. Calculations
-    if (q_dir / "cal.tsv").exists():
-        logger.info("Ingesting Calculations (cal.tsv)...")
-        cal_df = transform_calculations(scan_tsv_lazy(q_dir / "cal.tsv").collect())
-        bulk_copy_dataframe(cal_df, "sec_financials.calculation_relationships", CAL_COLS)
+        # 5. Text Disclosures
+        if (q_dir / "txt.tsv").exists():
+            logger.info("Streaming Text Disclosures (txt.tsv)...")
+            for idx, raw_chunk in enumerate(stream_batches(q_dir / "txt.tsv", batch_size=100_000)):
+                clean_chunk = transform_text_disclosures(raw_chunk)
+                rows = bulk_copy_dataframe(
+                        clean_chunk,
+                        "sec_financials.text_disclosures",
+                        TXT_COLS)
+                total_records += rows
 
-    # 7. Company tickers
-    if is_ticker_mf:
-        print(f"Value of is_ticker_mf:{is_ticker_mf}")
-        logger.info("Ingesting Company ticker (company_ticker_mf.json)...")
-        sync_mutual_fund_tickers()
+        # 6. Labels (includes "verbose")
+        if (q_dir / "lab.tsv").exists():
+            logger.info("Ingesting Presentation Labels (lab.tsv)...")
+            lab_df = transform_labels(scan_tsv_lazy(q_dir / "lab.tsv").collect())
+            rows = bulk_copy_dataframe(
+                    lab_df,
+                    "sec_financials.presentation_labels",
+                    LAB_COLS)
+            total_records += rows
 
-    #8 Directory cleanup
-    logger.info("Copying metadata to processed and cleaning up the raw data...")
-    copy_metadata_and_clean_directory(RAW_DATA_DIR, PROCESSED_DATA_DIR)
+        # 7. Calculations
+        if (q_dir / "cal.tsv").exists():
+            logger.info("Ingesting Calculations (cal.tsv)...")
+            cal_df = transform_calculations(scan_tsv_lazy(q_dir / "cal.tsv").collect())
+            rows = bulk_copy_dataframe(
+                    cal_df,
+                    "sec_financials.calculation_relationships",
+                    CAL_COLS)
+            total_records += rows
 
-    logger.info("ETL pipeline complete for %dq%d.", year, quarter)
+        # 8. Company tickers
+        if is_ticker_mf:
+            print(f"Value of is_ticker_mf:{is_ticker_mf}")
+            logger.info("Ingesting Company ticker (company_ticker_mf.json)...")
+            sync_mutual_fund_tickers()
+
+        # 9. Directory cleanup
+        logger.info("Copying metadata to processed and cleaning up the raw data...")
+        copy_metadata_and_clean_directory(RAW_DATA_DIR, PROCESSED_DATA_DIR)
+
+        logger.info("ETL pipeline complete for %dq%d.", year, quarter)
+
+        # 10. Mark COMPLETED
+        mark_pipeline_success(log_id, total_records)
+        logger.info("ETL pipeline complete for %dq%d. Ingested %d records.", year, quarter, total_records)
+
+    except Exception as e:
+        error_details = traceback.format_exc()
+        logger.error("Pipeline failed for %dq%d: %s", year, quarter, e)
+        mark_pipeline_failed(log_id, error_details, partial_records=total_records)
+        raise
 
 def copy_metadata_and_clean_directory(source: Path, destination: Path):
     """Function to move a directory to another directory"""
