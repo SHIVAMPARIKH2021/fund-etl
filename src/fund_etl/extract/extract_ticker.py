@@ -1,12 +1,12 @@
 # fund_etl/extract/tickers.py
 import io
 import logging
-from datetime import datetime, timezone
-
 import httpx
 import polars as pl
 import psycopg
 
+from datetime import datetime, timezone
+from fund_etl.sql.queries import create_temporary_ticker_table, copy_temporary_ticker_mf, insert_tickers, update_tickers
 from fund_etl.config import settings
 
 logger = logging.getLogger(__name__)
@@ -52,17 +52,10 @@ def sync_mutual_fund_tickers() -> None:
     with psycopg.connect(str(settings.database_url)) as conn:
         with conn.cursor() as cur:
             # 1. Create temp table matching structure
-            cur.execute("""
-                CREATE TEMP TABLE tmp_tickers (
-                    LIKE sec_financials.company_tickers_mf INCLUDING DEFAULTS
-                ) ON COMMIT DROP;
-            """)
+            cur.execute(create_temporary_ticker_table)
 
             # 2. Fast streaming COPY into temp table
-            copy_sql = """
-                COPY tmp_tickers (cik, series_id, class_id, symbol)
-                FROM STDIN WITH (FORMAT csv, DELIMITER E'\\t')
-            """
+            copy_sql = copy_temporary_ticker_mf
             with cur.copy(copy_sql) as copy:
                 while chunk := buffer.read(65536):
                     copy.write(chunk)
@@ -70,41 +63,11 @@ def sync_mutual_fund_tickers() -> None:
             # 3. Upsert into target table:
             #    - New rows: insert with is_active = TRUE, first_seen = NOW, last_seen = NOW
             #    - Existing rows: reactivate if was inactive, refresh last_seen to NOW, update symbol/series_id
-            cur.execute("""
-                INSERT INTO sec_financials.company_tickers_mf (
-                    cik,
-                    series_id,
-                    class_id,
-                    symbol,
-                    is_active,
-                    first_seen,
-                    last_seen
-                )
-                SELECT 
-                    cik,
-                    series_id,
-                    class_id,
-                    symbol,
-                    TRUE,
-                    CURRENT_TIMESTAMP,
-                    CURRENT_TIMESTAMP
-                FROM tmp_tickers
-                ON CONFLICT (class_id) DO UPDATE SET
-                    symbol     = EXCLUDED.symbol,
-                    series_id  = EXCLUDED.series_id,
-                    cik        = EXCLUDED.cik,
-                    is_active  = TRUE,
-                    last_seen  = CURRENT_TIMESTAMP;
-            """)
+            cur.execute(insert_tickers)
 
             # 4. Soft-deactivate entries absent from this SEC payload
             #    Any active record whose last_seen was NOT updated in this run is marked inactive
-            cur.execute("""
-                UPDATE sec_financials.company_tickers_mf
-                SET is_active = FALSE
-                WHERE is_active = TRUE
-                  AND last_seen < %(sync_start)s;
-            """, {"sync_start": sync_start_time})
+            cur.execute(update_tickers, {"sync_start": sync_start_time})
 
             deactivated_count = cur.rowcount
             if deactivated_count > 0:
