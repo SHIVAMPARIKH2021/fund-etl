@@ -1,4 +1,3 @@
-# fund_etl/main.py
 import argparse
 import logging
 import os
@@ -26,6 +25,7 @@ from fund_etl.transform.transform import (
     transform_tags,
     transform_text_disclosures,
 )
+from fund_etl.sql.queries import get_file_ingestion_status
 
 logging.basicConfig(
     level=logging.INFO,
@@ -190,6 +190,63 @@ def copy_metadata_and_clean_directory(source: Path, destination: Path):
                     shutil.copy(file, full_destination_path)
         shutil.rmtree(full_source_path)
 
+def check_job_execution(year: int, quarter: int) -> bool:
+    if not (1 <= quarter <= 4):
+        logger.error("Invalid quarter supplied: %s. Quarter must be between 1 and 4.", quarter)
+        return False
+
+    if year < 2000:
+        logger.error("Invalid year supplied: %s.", year)
+        return False
+
+    # 1. Verify database ingestion status
+    db_completed = False
+    try:
+        with psycopg.connect(str(settings.database_url)) as conn:
+            with conn.cursor() as cur:
+                cur.execute(get_file_ingestion_status, {"quarter": quarter, "year": year})
+                row = cur.fetchone()
+                if row and row[0] == "COMPLETED":
+                    db_completed = True
+                else:
+                    status = row[0] if row else "NOT_FOUND"
+                    logger.info("Quarterly pipeline %dq%d DB status is '%s'.", year, quarter, status)
+    except psycopg.Error as e:
+        logger.error("Database error while checking pipeline execution for %dq%d: %s", year, quarter, e)
+        return False
+
+    if not db_completed:
+        return False
+
+    # 2. Direct path verification for processed artifacts
+    target_quarter_dir = PROCESSED_DATA_DIR / f"{year}q{quarter}"
+    readme_file = target_quarter_dir / "readme.htm"
+    metadata_file = target_quarter_dir / "rr1-metadata.json"
+
+    try:
+        if not target_quarter_dir.is_dir():
+            logger.warning("Processed directory not found for quarter: %s", target_quarter_dir)
+            return False
+
+        has_readme = readme_file.is_file() and readme_file.stat().st_size > 0
+        has_metadata = metadata_file.is_file() and metadata_file.stat().st_size > 0
+
+        if not (has_readme and has_metadata):
+            logger.warning(
+                "Missing or empty artifacts for %dq%d: readme.htm=%s, rr1-metadata.json=%s",
+                year,
+                quarter,
+                has_readme,
+                has_metadata,
+            )
+            return False
+
+    except OSError as e:
+        logger.error("File system error accessing artifacts for %dq%d: %s", year, quarter, e)
+        return False
+
+    return True
+
 
 def str_to_bool(value):
     if isinstance(value, bool):
@@ -209,5 +266,7 @@ if __name__ == "__main__":
     parser.add_argument("--ticker", type=str_to_bool, required=True, help="Ticker MF (True/False)")
     parser.add_argument("--force", action="store_true", help="Force re-download")
     args = parser.parse_args()
-
-    run_pipeline(year=args.year, quarter=args.quarter, is_ticker_mf=args.ticker, force=args.force)
+    if not check_job_execution(args.year, args.quarter):
+        run_pipeline(year=args.year, quarter=args.quarter, is_ticker_mf=args.ticker, force=args.force)
+    else:
+        raise Exception(f"Successful Job Execution Found for Q{args.quarter} {args.year}.")

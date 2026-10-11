@@ -106,3 +106,10 @@ update_pipeline_execution_log = """
         updated_at = CURRENT_TIMESTAMP
     WHERE log_id = %(log_id)s;
 """
+
+get_file_ingestion_status = """
+    select ingestion_status 
+    from sec_financials.pipeline_execution_log
+    where filing_quarter =  %(quarter)s
+    and filing_year = %(year)s;
+"""
