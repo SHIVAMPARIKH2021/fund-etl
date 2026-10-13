@@ -16,6 +16,7 @@ from fund_etl.sql.queries import (
     create_temporary_tag_bridge_table,
     copy_temporary_tag_bridge_table
 )
+import pandera as pa
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +27,19 @@ def bulk_copy_dataframe(
     target_columns: Sequence[str],
     conflict_columns: Sequence[str] | None = None,
     extra_columns: dict[str, Any] | None = None,
+    schema: pa.DataFrameSchema | None = None,
 ) -> int:
     """Streams a Polars DataFrame into Postgres using psycopg COPY protocol in CSV format."""
     if df.is_empty():
         return 0
+
+    # Optional Pandera validation step before transformation & copy
+    if schema is not None:
+        try:
+            schema.validate(df)
+        except pa.errors.SchemaError as exc:
+            logger.error("Data validation failed for table %s: %s", table_name, exc)
+            raise
 
     # Inject static columns (e.g., quarter_id)
     if extra_columns:
