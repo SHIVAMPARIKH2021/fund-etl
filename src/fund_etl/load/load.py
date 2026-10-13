@@ -13,6 +13,8 @@ from fund_etl.sql.queries import (
     copy_quarter_taxonomy_tags,
     create_temporary_sec_financial_table,
     sql_insert,
+    create_temporary_tag_bridge_table,
+    copy_temporary_tag_bridge_table
 )
 
 logger = logging.getLogger(__name__)
@@ -105,14 +107,9 @@ def link_quarter_taxonomy_tags(tag_df: pl.DataFrame, quarter_id: int) -> int:
 
     with psycopg.connect(str(settings.database_url)) as conn:
         with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TEMP TABLE tmp_tag_bridge (
-                    tag TEXT NOT NULL,
-                    version TEXT NOT NULL
-                ) ON COMMIT DROP;
-            """)
+            cur.execute(create_temporary_tag_bridge_table)
 
-            with cur.copy("COPY tmp_tag_bridge (tag, version) FROM STDIN WITH (FORMAT csv, DELIMITER E'\\t', NULL '')") as copy:
+            with cur.copy(copy_temporary_tag_bridge_table) as copy:
                 while chunk := buffer.read(65536):
                     copy.write(chunk)
 

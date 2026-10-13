@@ -113,3 +113,12 @@ get_file_ingestion_status = """
     where filing_quarter =  %(quarter)s
     and filing_year = %(year)s;
 """
+
+create_temporary_tag_bridge_table = """
+                CREATE TEMP TABLE tmp_tag_bridge (
+                    tag TEXT NOT NULL,
+                    version TEXT NOT NULL
+                ) ON COMMIT DROP;
+"""
+
+copy_temporary_tag_bridge_table = """COPY tmp_tag_bridge (tag, version) FROM STDIN WITH (FORMAT csv, DELIMITER E'\\t', NULL '')"""
