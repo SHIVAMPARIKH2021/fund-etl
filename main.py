@@ -3,10 +3,11 @@ import logging
 import os
 import shutil
 import traceback
-from pathlib import Path
-
 import psycopg
+import pandera.polars as pa
+import polars as pl
 
+from pathlib import Path
 from fund_etl.config import PROCESSED_DATA_DIR, RAW_DATA_DIR, settings
 from fund_etl.extract.extract import download_and_extract_quarter, scan_tsv_lazy, stream_batches
 from fund_etl.extract.extract_ticker import sync_mutual_fund_tickers
@@ -55,6 +56,30 @@ TXT_COLS = [
 LAB_COLS = ["adsh", "tag", "version", "std", "terse", "verbose", "total", "negated", "negatedterse"]
 CAL_COLS = ["adsh", "grp", "arc", "negative", "ptag", "pversion", "ctag", "cversion"]
 
+# Schema for the SEC Submissions table (sub.txt)
+sub_schema = pa.DataFrameSchema({
+    "adsh": pa.Column(
+        pl.String,
+        checks=[
+            pa.Check.str_length(20, 20),
+            pa.Check.str_matches(r"^\d{10}-\d{2}-\d{6}$"),  # SEC standard ADSH format
+        ],
+        nullable=False,
+    ),
+    "cik": pa.Column(pl.Int32, nullable=False),
+    "name": pa.Column(pl.String, nullable=False),
+})
+
+# Schema for SEC Numerical values (num.txt)
+num_schema = pa.DataFrameSchema({
+    "adsh": pa.Column(pl.String, checks=pa.Check.str_length(20, 20), nullable=False),
+    "tag": pa.Column(pl.String, nullable=False),
+    "version": pa.Column(pl.String, nullable=False),
+    "ddate": pa.Column(pl.Date, nullable=False),
+    "qtrs": pa.Column(pl.Int64, nullable=False, required=False),
+    "uom": pa.Column(pl.String, nullable=False),
+    "value": pa.Column(pl.Float64, nullable=True),
+})
 
 def resolve_quarter_id(year: int, quarter: int) -> int:
     """Fetches or registers the quarter configuration record."""
@@ -92,6 +117,7 @@ def run_pipeline(year: int, quarter: int, is_ticker_mf: bool, force: bool = Fals
             SUB_COLS,
             conflict_columns=["adsh"],
             extra_columns={"quarter_id": quarter_id},
+            schema=sub_schema
         )
         total_records += rows
 
@@ -118,6 +144,7 @@ def run_pipeline(year: int, quarter: int, is_ticker_mf: bool, force: bool = Fals
                 clean_chunk,
                 "sec_financials.numeric_facts",
                 NUM_COLS,
+                schema=num_schema
             )
             total_records += rows
             logger.info("num.tsv chunk %d ingested: %d rows", idx, rows)
