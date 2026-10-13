@@ -62,7 +62,7 @@ def resolve_quarter_id(year: int, quarter: int) -> int:
         with conn.cursor() as cur:
             cur.execute(
                 get_or_create_quarter_config,
-                {"year": year, "quarter": quarter, "updated_by": "python-fund-etl"}
+                {"year": year, "quarter": quarter, "updated_by": "fund-etl"}
             )
             quarter_id = cur.fetchone()[0]
         conn.commit()
