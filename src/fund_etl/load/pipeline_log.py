@@ -5,7 +5,7 @@ from fund_etl.config import settings
 from fund_etl.sql.queries import insert_pipeline_execution_log, update_pipeline_execution_log
 
 
-def start_pipeline_execution(year: int, quarter: int, created_by: str = "python-fund-etl") -> int:
+def start_pipeline_execution(year: int, quarter: int, created_by: str = "fund-etl") -> int:
     """
     Initializes or updates the pipeline run to IN_PROGRESS.
     Upserts using uq_pipeline_year_quarter constraint.
