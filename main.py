@@ -310,11 +310,7 @@ def get_database_url() -> str:
     encoded_password = quote_plus(password)
 
     # Set search_path so queries resolve directly in the target schema
-    conn_url = (
-        f"postgresql://{user}:{encoded_password}@{host}:{port}/{dbname}"
-        f"?options=-c%20search_path%3D{schema}"
-    )
-    return conn_url
+    return f"postgresql://{user}:{encoded_password}@{host}:{port}/{dbname}"
 
 def run_dry_run() -> bool:
     logger.info("=== Starting fund-etl DRY RUN ===")

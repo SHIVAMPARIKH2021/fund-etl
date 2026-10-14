@@ -73,10 +73,7 @@ class Settings(BaseSettings):
             )
 
         encoded_password = quote_plus(password)
-        return (
-            f"postgresql://{user}:{encoded_password}@{host}:{port}/{name}"
-            f"?options=-c%20search_path%3D{schema}"
-        )
+        return f"postgresql://{user}:{encoded_password}@{host}:{port}/{name}"
 
 
 # Singleton instance used across modules
