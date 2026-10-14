@@ -39,7 +39,7 @@ pipeline {
                     env.SEC_USER_AGENT = secrets.SEC_USER_AGENT
 
                     // Discrete Database credentials
-                    env.DB_USER        = secrets.DB_USER
+                    env.DB_USERNAME        = secrets.DB_USERNAME
                     env.DB_PASSWORD    = secrets.DB_PASSWORD
                     env.DB_HOST        = secrets.DB_HOST ?: 'host.docker.internal'
                     env.DB_PORT        = secrets.DB_PORT ?: '5432'
@@ -102,7 +102,7 @@ pipeline {
                                 ${WINDOWS_USER}@${WINDOWS_HOST} \
                                 "docker run --rm \
                                     --add-host=host.docker.internal:host-gateway \
-                                    -e DB_USER='${DB_USER}' \
+                                    -e DB_USERNAME='${DB_USERNAME}' \
                                     -e DB_PASSWORD='${DB_PASSWORD}' \
                                     -e DB_HOST='${DB_HOST}' \
                                     -e DB_PORT='${DB_PORT}' \
