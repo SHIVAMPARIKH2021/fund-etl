@@ -2,7 +2,8 @@ pipeline {
     agent any
 
     parameters {
-        booleanParam(name: 'DRY_RUN', defaultValue: true, description: 'Run pre-flight connectivity verification without data mutations')
+        booleanParam(name: 'DRY_RUN', defaultValue: true, description: 'Run pre-flight connectivity verification without database mutations')
+        string(name: 'TICKER', defaultValue: 'SPY', description: 'Fund ticker symbol to process')
         choice(name: 'FILING_YEAR', choices: ['2026', '2025', '2024'], description: 'SEC filing year')
         choice(name: 'FILING_QUARTER', choices: ['1', '2', '3', '4'], description: 'SEC filing quarter')
     }
@@ -19,7 +20,6 @@ pipeline {
         stage('Fetch Secrets from Doppler Cloud') {
             steps {
                 script {
-                    // Safe shell execution: uses single quotes to eliminate Groovy interpolation warning
                     def response = sh(
                         script: '''
                             curl -s --request GET \
@@ -64,7 +64,9 @@ pipeline {
         stage('Execute ETL (Dry Run / Scheduled)') {
             steps {
                 script {
-                    def runArgs = params.DRY_RUN ? "--dry-run" : "--year ${params.FILING_YEAR} --quarter ${params.FILING_QUARTER}"
+                    // Always include the required CLI arguments; append --dry-run when checked
+                    def baseArgs = "--year ${params.FILING_YEAR} --quarter ${params.FILING_QUARTER} --ticker ${params.TICKER}"
+                    def runArgs  = params.DRY_RUN ? "${baseArgs} --dry-run" : baseArgs
 
                     withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CREDS_ID, keyFileVariable: 'SSH_KEY')]) {
                         sh """
