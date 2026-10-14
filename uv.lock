@@ -123,6 +123,7 @@ source = { editable = "." }
 dependencies = [
     { name = "httpx" },
     { name = "pandas" },
+    { name = "pandera", extra = ["polars"] },
     { name = "polars" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
@@ -133,7 +134,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "pandera" },
     { name = "pytest" },
     { name = "pytest-cov" },
 ]
@@ -142,6 +142,7 @@ dev = [
 requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "pandas", specifier = ">=3.0.5" },
+    { name = "pandera", extras = ["polars"], specifier = ">=0.23.0" },
     { name = "polars", specifier = ">=1.44.2" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2.0" },
     { name = "pydantic", specifier = ">=2.13.5" },
@@ -152,7 +153,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pandera", specifier = ">=0.23.0" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-cov", specifier = ">=6.0.0" },
 ]
@@ -324,6 +324,11 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/bf/56/6c86add6272b295ea77f629757c6d79a12ec30ac51e01a0428d6ff11224c/pandera-0.34.1.tar.gz", hash = "sha256:8907a976403757c5e05a73022d4c447c74844d01c6053667b9a2ca63f26c2fa6", size = 1066371, upload-time = "2026-10-06T15:16:29.118Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/53/e2/f86fdba3312c977beb39e7c3b29d1cdb43c508ed8278ff40aa329aa10611/pandera-0.34.1-py3-none-any.whl", hash = "sha256:fbcbd0aafeb8d69d7db0ab7990e89cbea31c2c5b8a5e9bde8b3a33f8678975a4", size = 535038, upload-time = "2026-10-06T15:16:27.372Z" },
+]
+
+[package.optional-dependencies]
+polars = [
+    { name = "polars" },
 ]
 
 [[package]]
