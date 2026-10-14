@@ -2,6 +2,7 @@ import argparse
 import logging
 import os
 import shutil
+import sys
 import traceback
 import psycopg
 import pandera.polars as pa
@@ -286,14 +287,52 @@ def str_to_bool(value):
         raise argparse.ArgumentTypeError("Boolean value expected (True/False).")
 
 
+def run_dry_run() -> bool:
+    logger.info("=== Starting fund-etl DRY RUN ===")
+
+    # 1. Test Native Windows PostgreSQL connectivity
+    try:
+        logger.info("Testing PostgreSQL connection at: %s", settings.database_url)
+        with psycopg.connect(str(settings.database_url), connect_timeout=5) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT version();")
+                version = cur.fetchone()[0]
+                logger.info("PostgreSQL Reachable: %s", version)
+    except Exception as e:
+        logger.error("Database connection failed: %s", e)
+        return False
+
+    # 2. Test SEC API Connectivity
+    try:
+        import httpx
+        logger.info("Testing SEC endpoint connectivity...")
+        headers = {"User-Agent": settings.sec_user_agent}
+        with httpx.Client(headers=headers, timeout=10.0) as client:
+            resp = client.get(settings.ticker_url)
+            resp.raise_for_status()
+            logger.info("SEC endpoint reachable (HTTP %d).", resp.status_code)
+    except Exception as e:
+        logger.error("SEC endpoint connectivity check failed: %s", e)
+        return False
+
+    logger.info("=== DRY RUN COMPLETED SUCCESSFULLY ===")
+    return True
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SEC Fund Prospectus ETL")
+    parser.add_argument("--dry-run", action="store_true", help="Perform pre-flight connectivity checks without executing data staging.")
     parser.add_argument("--year", type=int, required=True, help="Year (e.g. 2026)")
     parser.add_argument("--quarter", type=int, choices=[1, 2, 3, 4], required=True, help="Quarter (1-4)")
     parser.add_argument("--ticker", type=str_to_bool, required=True, help="Ticker MF (True/False)")
     parser.add_argument("--force", action="store_true", help="Force re-download")
     args = parser.parse_args()
-    if not check_job_execution(args.year, args.quarter):
-        run_pipeline(year=args.year, quarter=args.quarter, is_ticker_mf=args.ticker, force=args.force)
+
+    if args.dry_run:
+        success = run_dry_run()
+        sys.exit(0 if success else 1)
     else:
-        raise Exception(f"Successful Job Execution Found for Q{args.quarter} {args.year}.")
+        if not check_job_execution(args.year, args.quarter):
+            run_pipeline(year=args.year, quarter=args.quarter, is_ticker_mf=args.ticker, force=args.force)
+        else:
+            raise Exception(f"Successful Job Execution Found for Q{args.quarter} {args.year}.")
