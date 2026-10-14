@@ -289,39 +289,19 @@ def str_to_bool(value):
         raise argparse.ArgumentTypeError("Boolean value expected (True/False).")
 
 
-def get_database_url() -> str:
-    """Builds PostgreSQL connection URI from discrete environment variables."""
-    # If a full URL is provided as fallback, prioritize it
-    if full_url := os.getenv("DATABASE_URL"):
-        return full_url
-
-    user = os.getenv("DB_USERNAME", "app_admin")
-    password = os.getenv("DB_PASSWORD", "")
-    host = os.getenv("DB_HOST", "host.docker.internal")
-    port = os.getenv("DB_PORT", "5432")
-    dbname = os.getenv("DB_NAME", "funds")
-    schema = os.getenv("DB_SCHEMA", "sec_financials")
-
-    if not password:
-        logger.error("DB_PASSWORD environment variable is missing or empty.")
-        sys.exit(1)
-
-    # Encode password to guard against special characters (@, :, /, etc.)
-    encoded_password = quote_plus(password)
-
-    # Set search_path so queries resolve directly in the target schema
-    return f"postgresql://{user}:{encoded_password}@{host}:{port}/{dbname}"
-
 def run_dry_run() -> bool:
     logger.info("=== Starting fund-etl DRY RUN ===")
 
     # 1. Test Native Windows PostgreSQL connectivity
-    url = get_database_url()
-    masked_url = url.split("@")[-1] if "@" in url else url
-    logger.info(f"Connecting to database endpoint: ...@{masked_url}")
+    conn_str = str(settings.database_url)
+
+    # Extract only host, port, and database name for completely sanitized logging
+    db_endpoint = conn_str.split("@")[-1] if "@" in conn_str else "configured endpoint"
+    logger.info("Testing PostgreSQL connection at: %s", db_endpoint)
+
     try:
-        logger.info("Testing PostgreSQL connection at: %s", settings.database_url)
-        with psycopg.connect(masked_url, connect_timeout=5) as conn:
+        # Pass the full conn_str to psycopg.connect, NOT the masked string
+        with psycopg.connect(conn_str, connect_timeout=5) as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT version();")
                 version = cur.fetchone()[0]
@@ -330,7 +310,7 @@ def run_dry_run() -> bool:
         logger.error("Database connection failed: %s", e)
         return False
 
-    # 2. Test SEC API Connectivity
+    # 2. Test SEC API Connectivity (Without logging the user agent string)
     try:
         import httpx
         logger.info("Testing SEC endpoint connectivity...")
@@ -345,7 +325,6 @@ def run_dry_run() -> bool:
 
     logger.info("=== DRY RUN COMPLETED SUCCESSFULLY ===")
     return True
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SEC Fund Prospectus ETL")
