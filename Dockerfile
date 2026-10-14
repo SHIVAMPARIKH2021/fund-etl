@@ -13,17 +13,16 @@ RUN pip install "uv>=0.12.13,<0.13.0"
 # Copy dependency manifests
 COPY pyproject.toml uv.lock ./
 
-# Step 1: Install ONLY third-party dependencies (cached unless locks change)
+# Install ONLY third-party dependencies into the virtual environment
 RUN uv sync --frozen --no-dev --no-install-project
 
-# Step 2: Copy application source code
+# Copy application code and files
+COPY README.md* ./
 COPY src/ ./src/
 COPY main.py ./
 
-# Step 3: Fast install of the local project package
-RUN uv sync --frozen --no-dev
-
-# Set python path
+# Set python path so Python finds packages in /app/src
 ENV PYTHONPATH=/app/src
 
+# Default entrypoint to run the pipeline
 ENTRYPOINT ["uv", "run", "python", "main.py"]
