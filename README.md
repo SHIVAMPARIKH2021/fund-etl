@@ -1,11 +1,6 @@
 ## Fund ETL Job
 - This job loads Mutual Fund data into Postgresql database.
 - Build with below command
-```bash
-python -m build
-```
-
-OR
 
 ```bash
 uv build

@@ -1,5 +1,8 @@
+import os
 from pathlib import Path
-from pydantic import PostgresDsn, Field
+from typing import Optional
+from urllib.parse import quote_plus
+from pydantic import Field, PostgresDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Base directory pointing to repo root: fund-etl/
@@ -15,14 +18,24 @@ class Settings(BaseSettings):
     Automatically reads from environment variables, falls back to .env,
     and fails loudly at boot if required parameters are missing or invalid.
     """
-    # Required parameters (Pipeline crashes immediately on startup if missing)
-    database_url: PostgresDsn = Field(
-        ..., 
-        description="Postgres connection string"
+    # Discrete database configuration fields
+    db_user: Optional[str] = Field("app_admin", description="Database username")
+    db_password: Optional[str] = Field(None, description="Database password")
+    db_host: Optional[str] = Field("localhost", description="Database host")
+    db_port: Optional[int] = Field(5432, description="Database port")
+    db_name: Optional[str] = Field("funds", description="Database name")
+    db_schema: Optional[str] = Field("sec_financials", description="Default search schema")
+
+    # Dynamic or direct connection URL
+    database_url: Optional[PostgresDsn] = Field(
+        None,
+        description="Postgres connection string. Auto-assembled if not explicitly provided."
     )
+
+    # Required SEC parameters
     sec_user_agent: str = Field(
-        ..., 
-        min_length=10, 
+        ...,
+        min_length=10,
         description="User-Agent required by SEC (e.g., 'AppName admin@domain.com')"
     )
 
@@ -36,8 +49,34 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=str(BASE_DIR / ".env"),
         env_file_encoding="utf-8",
-        extra="ignore",  # Allows other system env vars without raising validation errors
+        extra="ignore",
     )
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def assemble_db_connection(cls, v: Optional[str], info) -> str:
+        # If full database_url is already explicitly set in environment or .env, use it
+        if v:
+            return str(v)
+
+        data = info.data
+        user = data.get("db_user") or os.getenv("DB_USER", "app_admin")
+        password = data.get("db_password") or os.getenv("DB_PASSWORD", "")
+        host = data.get("db_host") or os.getenv("DB_HOST", "localhost")
+        port = data.get("db_port") or os.getenv("DB_PORT", 5432)
+        name = data.get("db_name") or os.getenv("DB_NAME", "funds")
+        schema = data.get("db_schema") or os.getenv("DB_SCHEMA", "sec_financials")
+
+        if not password:
+            raise ValueError(
+                "Cannot assemble database_url: 'DB_PASSWORD' (or 'db_password') must be provided."
+            )
+
+        encoded_password = quote_plus(password)
+        return (
+            f"postgresql://{user}:{encoded_password}@{host}:{port}/{name}"
+            f"?options=-c%20search_path%3D{schema}"
+        )
 
 
 # Singleton instance used across modules
