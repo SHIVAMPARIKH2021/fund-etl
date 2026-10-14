@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     and fails loudly at boot if required parameters are missing or invalid.
     """
     # Discrete database configuration fields
-    db_user: Optional[str] = Field("app_admin", description="Database username")
+    db_username: Optional[str] = Field("app_admin", description="Database username")
     db_password: Optional[str] = Field(None, description="Database password")
     db_host: Optional[str] = Field("localhost", description="Database host")
     db_port: Optional[int] = Field(5432, description="Database port")
@@ -60,7 +60,7 @@ class Settings(BaseSettings):
             return str(v)
 
         data = info.data
-        user = data.get("db_user") or os.getenv("DB_USER", "app_admin")
+        user = data.get("db_username") or os.getenv("DB_USERNAME", "app_admin")
         password = data.get("db_password") or os.getenv("DB_PASSWORD", "")
         host = data.get("db_host") or os.getenv("DB_HOST", "localhost")
         port = data.get("db_port") or os.getenv("DB_PORT", 5432)

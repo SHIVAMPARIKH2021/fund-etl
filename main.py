@@ -295,7 +295,7 @@ def get_database_url() -> str:
     if full_url := os.getenv("DATABASE_URL"):
         return full_url
 
-    user = os.getenv("DB_USER", "app_admin")
+    user = os.getenv("DB_USERNAME", "app_admin")
     password = os.getenv("DB_PASSWORD", "")
     host = os.getenv("DB_HOST", "host.docker.internal")
     port = os.getenv("DB_PORT", "5432")
