@@ -25,4 +25,4 @@ COPY main.py ./
 ENV PYTHONPATH=/app/src
 
 # Default entrypoint to run the pipeline
-ENTRYPOINT ["uv", "run", "python", "main.py"]
+ENTRYPOINT ["uv", "run", "--no-sync", "python", "main.py"]
