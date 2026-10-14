@@ -94,23 +94,31 @@ pipeline {
                     def baseArgs = "--year ${params.FILING_YEAR} --quarter ${params.FILING_QUARTER} --ticker ${params.TICKER}"
                     def runArgs  = params.DRY_RUN ? "${baseArgs} --dry-run" : baseArgs
 
-                    withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CREDS_ID, keyFileVariable: 'SSH_KEY')]) {
-                        sh """
-                            ssh -i "\$SSH_KEY" \
-                                -o StrictHostKeyChecking=no \
-                                -o ConnectTimeout=15 \
-                                ${WINDOWS_USER}@${WINDOWS_HOST} \
-                                "docker run --rm \
-                                    --add-host=host.docker.internal:host-gateway \
-                                    -e DB_USERNAME='${DB_USERNAME}' \
-                                    -e DB_PASSWORD='${DB_PASSWORD}' \
-                                    -e DB_HOST='${DB_HOST}' \
-                                    -e DB_PORT='${DB_PORT}' \
-                                    -e DB_NAME='${DB_NAME}' \
-                                    -e DB_SCHEMA='${DB_SCHEMA}' \
-                                    -e SEC_USER_AGENT='${SEC_USER_AGENT}' \
-                                    ${IMAGE_BASE_NAME}:${GIT_COMMIT_SHORT} ${runArgs}"
-                        """
+                    withCredentials([
+                            sshUserPrivateKey(credentialsId: env.SSH_CREDS_ID, keyFileVariable: 'SSH_KEY'),
+                            // Registering the password with maskCredentials or as a secret text prevents console leakage
+                            string(credentialsId: 'doppler-personal-token', variable: 'DOPPLER_SECRET_TOKEN')
+                        ]) {
+                        // Pass secrets as environment variables to the shell process rather than interpolating into the command line
+                        sh script: '''
+                    set +x
+                    echo "Executing fund-etl container remotely on Windows host..."
+
+                    ssh -i "$SSH_KEY" \
+                        -o StrictHostKeyChecking=no \
+                        -o ConnectTimeout=15 \
+                        ${WINDOWS_USER}@${WINDOWS_HOST} \
+                        "docker run --rm \
+                            --add-host=host.docker.internal:host-gateway \
+                            -e DB_USERNAME='${DB_USERNAME}' \
+                            -e DB_PASSWORD='${DB_PASSWORD}' \
+                            -e DB_HOST='${DB_HOST}' \
+                            -e DB_PORT='${DB_PORT}' \
+                            -e DB_NAME='${DB_NAME}' \
+                            -e DB_SCHEMA='${DB_SCHEMA}' \
+                            -e SEC_USER_AGENT='${SEC_USER_AGENT}' \
+                            ${IMAGE_BASE_NAME}:${GIT_COMMIT_SHORT} ${runArgs}"
+                ''', returnStdout: false
                     }
                 }
             }
