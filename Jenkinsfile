@@ -3,7 +3,7 @@ pipeline {
 
     parameters {
         booleanParam(name: 'DRY_RUN', defaultValue: true, description: 'Run pre-flight connectivity verification without database mutations')
-        string(name: 'TICKER', defaultValue: 'SPY', description: 'Fund ticker symbol to process')
+        string(name: 'TICKER', defaultValue: 'False', description: 'Fund ticker symbol to process')
         choice(name: 'FILING_YEAR', choices: ['2026', '2025', '2024'], description: 'SEC filing year')
         choice(name: 'FILING_QUARTER', choices: ['1', '2', '3', '4'], description: 'SEC filing quarter')
         booleanParam(name: 'FORCE_DOCKER_NO_CACHE', defaultValue: true, description: 'Force Docker to rebuild all layers without cache')
