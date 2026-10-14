@@ -6,6 +6,7 @@ pipeline {
         string(name: 'TICKER', defaultValue: 'SPY', description: 'Fund ticker symbol to process')
         choice(name: 'FILING_YEAR', choices: ['2026', '2025', '2024'], description: 'SEC filing year')
         choice(name: 'FILING_QUARTER', choices: ['1', '2', '3', '4'], description: 'SEC filing quarter')
+        booleanParam(name: 'FORCE_DOCKER_NO_CACHE', defaultValue: true, description: 'Force Docker to rebuild all layers without cache')
     }
 
     environment {
@@ -13,7 +14,7 @@ pipeline {
         DOPPLER_PROJECT = 'sec-pipeline'
         DOPPLER_CONFIG  = 'prd'
         SSH_CREDS_ID    = 'windows-laptop-ssh'
-        IMAGE_NAME      = 'fund-etl:latest'
+        IMAGE_BASE_NAME = 'fund-etl'
     }
 
     stages {
@@ -42,21 +43,46 @@ pipeline {
             }
         }
 
-        stage('Checkout Source Code') {
+        stage('Checkout & Sync Latest Git Code') {
             steps {
+                // Ensure SCM checkout updates cleanly to the tracking branch
                 checkout scm
+
+                script {
+                    // Force pull and hard reset to match remote HEAD exactly
+                    sh '''
+                        git fetch --all --prune
+                        git checkout master
+                        git reset --hard origin/master
+                    '''
+
+                    // Capture latest commit SHA for unique image tagging
+                    env.GIT_COMMIT_SHORT = sh(
+                        script: 'git rev-parse --short HEAD',
+                        returnStdout: true
+                    ).trim()
+
+                    echo "Building Docker image from commit: ${env.GIT_COMMIT_SHORT}"
+                }
             }
         }
 
         stage('Stream & Build Docker Image on Windows') {
             steps {
-                withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CREDS_ID, keyFileVariable: 'SSH_KEY')]) {
-                    sh '''
-                        tar -czf - . | ssh -i "$SSH_KEY" \
-                            -o StrictHostKeyChecking=no \
-                            -o ConnectTimeout=15 \
-                            ${WINDOWS_USER}@${WINDOWS_HOST} "docker build -t ${IMAGE_NAME} -"
-                    '''
+                script {
+                    def noCacheFlag = params.FORCE_DOCKER_NO_CACHE ? "--no-cache" : ""
+
+                    withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CREDS_ID, keyFileVariable: 'SSH_KEY')]) {
+                        sh """
+                            tar -czf - . | ssh -i "\$SSH_KEY" \
+                                -o StrictHostKeyChecking=no \
+                                -o ConnectTimeout=15 \
+                                ${WINDOWS_USER}@${WINDOWS_HOST} \
+                                "docker build ${noCacheFlag} \
+                                    -t ${IMAGE_BASE_NAME}:latest \
+                                    -t ${IMAGE_BASE_NAME}:${GIT_COMMIT_SHORT} -"
+                        """
+                    }
                 }
             }
         }
@@ -64,7 +90,6 @@ pipeline {
         stage('Execute ETL (Dry Run / Scheduled)') {
             steps {
                 script {
-                    // Always include the required CLI arguments; append --dry-run when checked
                     def baseArgs = "--year ${params.FILING_YEAR} --quarter ${params.FILING_QUARTER} --ticker ${params.TICKER}"
                     def runArgs  = params.DRY_RUN ? "${baseArgs} --dry-run" : baseArgs
 
@@ -78,7 +103,7 @@ pipeline {
                                     --add-host=host.docker.internal:host-gateway \
                                     -e DATABASE_URL='${DATABASE_URL}' \
                                     -e SEC_USER_AGENT='${SEC_USER_AGENT}' \
-                                    ${IMAGE_NAME} ${runArgs}"
+                                    ${IMAGE_BASE_NAME}:${GIT_COMMIT_SHORT} ${runArgs}"
                         """
                     }
                 }
@@ -91,7 +116,7 @@ pipeline {
             cleanWs()
         }
         success {
-            echo "Pipeline run completed successfully."
+            echo "Pipeline run completed successfully with commit ${env.GIT_COMMIT_SHORT}."
         }
         failure {
             echo "Pipeline execution failed. Check console output above."
