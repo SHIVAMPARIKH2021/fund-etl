@@ -4,6 +4,8 @@ import os
 import shutil
 import sys
 import traceback
+from urllib.parse import quote_plus
+
 import psycopg
 import pandera.polars as pa
 import polars as pl
@@ -287,13 +289,43 @@ def str_to_bool(value):
         raise argparse.ArgumentTypeError("Boolean value expected (True/False).")
 
 
+def get_database_url() -> str:
+    """Builds PostgreSQL connection URI from discrete environment variables."""
+    # If a full URL is provided as fallback, prioritize it
+    if full_url := os.getenv("DATABASE_URL"):
+        return full_url
+
+    user = os.getenv("DB_USER", "app_admin")
+    password = os.getenv("DB_PASSWORD", "")
+    host = os.getenv("DB_HOST", "host.docker.internal")
+    port = os.getenv("DB_PORT", "5432")
+    dbname = os.getenv("DB_NAME", "funds")
+    schema = os.getenv("DB_SCHEMA", "sec_financials")
+
+    if not password:
+        logger.error("DB_PASSWORD environment variable is missing or empty.")
+        sys.exit(1)
+
+    # Encode password to guard against special characters (@, :, /, etc.)
+    encoded_password = quote_plus(password)
+
+    # Set search_path so queries resolve directly in the target schema
+    conn_url = (
+        f"postgresql://{user}:{encoded_password}@{host}:{port}/{dbname}"
+        f"?options=-c%20search_path%3D{schema}"
+    )
+    return conn_url
+
 def run_dry_run() -> bool:
     logger.info("=== Starting fund-etl DRY RUN ===")
 
     # 1. Test Native Windows PostgreSQL connectivity
+    url = get_database_url()
+    masked_url = url.split("@")[-1] if "@" in url else url
+    logger.info(f"Connecting to database endpoint: ...@{masked_url}")
     try:
         logger.info("Testing PostgreSQL connection at: %s", settings.database_url)
-        with psycopg.connect(str(settings.database_url), connect_timeout=5) as conn:
+        with psycopg.connect(masked_url, connect_timeout=5) as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT version();")
                 version = cur.fetchone()[0]

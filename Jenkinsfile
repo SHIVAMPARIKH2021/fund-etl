@@ -2,10 +2,10 @@ pipeline {
     agent any
 
     parameters {
-        booleanParam(name: 'DRY_RUN', defaultValue: true, description: 'Run pre-flight connectivity verification without database mutations')
+        booleanParam(name: 'DRY_RUN', defaultValue: true, description: 'Verify database and SEC endpoint connectivity without writes')
         string(name: 'TICKER', defaultValue: 'False', description: 'Fund ticker symbol to process')
-        choice(name: 'FILING_YEAR', choices: ['2026', '2025', '2024'], description: 'SEC filing year')
-        choice(name: 'FILING_QUARTER', choices: ['1', '2', '3', '4'], description: 'SEC filing quarter')
+        choice(name: 'FILING_YEAR', choices: ['2026', '2025', '2024'], description: 'Target filing year')
+        choice(name: 'FILING_QUARTER', choices: ['1', '2', '3', '4'], description: 'Target filing quarter')
         booleanParam(name: 'FORCE_DOCKER_NO_CACHE', defaultValue: false, description: 'Force Docker to rebuild layers from scratch')
     }
 
@@ -33,36 +33,38 @@ pipeline {
 
                     def secrets = readJSON text: response
 
+                    // Host and connection details
                     env.WINDOWS_HOST   = secrets.WINDOWS_HOST
                     env.WINDOWS_USER   = secrets.WINDOWS_USER
-                    env.DATABASE_URL   = secrets.DATABASE_URL
                     env.SEC_USER_AGENT = secrets.SEC_USER_AGENT
 
-                    echo "Successfully pulled secrets from Doppler Cloud."
+                    // Discrete Database credentials
+                    env.DB_USER        = secrets.DB_USER
+                    env.DB_PASSWORD    = secrets.DB_PASSWORD
+                    env.DB_HOST        = secrets.DB_HOST ?: 'host.docker.internal'
+                    env.DB_PORT        = secrets.DB_PORT ?: '5432'
+                    env.DB_NAME        = secrets.DB_NAME ?: 'funds'
+                    env.DB_SCHEMA      = secrets.DB_SCHEMA ?: 'sec_financials'
+
+                    echo "Discrete database secrets loaded from Doppler Cloud."
                 }
             }
         }
 
         stage('Checkout & Sync Latest Git Code') {
             steps {
-                // Ensure SCM checkout updates cleanly to the tracking branch
                 checkout scm
-
                 script {
-                    // Force pull and hard reset to match remote HEAD exactly
                     sh '''
                         git fetch --all --prune
                         git checkout master
                         git reset --hard origin/master
                     '''
-
-                    // Capture latest commit SHA for unique image tagging
                     env.GIT_COMMIT_SHORT = sh(
                         script: 'git rev-parse --short HEAD',
                         returnStdout: true
                     ).trim()
-
-                    echo "Building Docker image from commit: ${env.GIT_COMMIT_SHORT}"
+                    echo "Deploying commit: ${env.GIT_COMMIT_SHORT}"
                 }
             }
         }
@@ -71,7 +73,6 @@ pipeline {
             steps {
                 script {
                     def noCacheFlag = params.FORCE_DOCKER_NO_CACHE ? "--no-cache" : ""
-
                     withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CREDS_ID, keyFileVariable: 'SSH_KEY')]) {
                         sh """
                             tar -czf - . | ssh -i "\$SSH_KEY" \
@@ -101,7 +102,12 @@ pipeline {
                                 ${WINDOWS_USER}@${WINDOWS_HOST} \
                                 "docker run --rm \
                                     --add-host=host.docker.internal:host-gateway \
-                                    -e DATABASE_URL='${DATABASE_URL}' \
+                                    -e DB_USER='${DB_USER}' \
+                                    -e DB_PASSWORD='${DB_PASSWORD}' \
+                                    -e DB_HOST='${DB_HOST}' \
+                                    -e DB_PORT='${DB_PORT}' \
+                                    -e DB_NAME='${DB_NAME}' \
+                                    -e DB_SCHEMA='${DB_SCHEMA}' \
                                     -e SEC_USER_AGENT='${SEC_USER_AGENT}' \
                                     ${IMAGE_BASE_NAME}:${GIT_COMMIT_SHORT} ${runArgs}"
                         """
@@ -116,10 +122,10 @@ pipeline {
             cleanWs()
         }
         success {
-            echo "Pipeline run completed successfully with commit ${env.GIT_COMMIT_SHORT}."
+            echo "Pipeline run completed successfully for commit ${env.GIT_COMMIT_SHORT}."
         }
         failure {
-            echo "Pipeline execution failed. Check console output above."
+            echo "Pipeline execution failed. Review logs above."
         }
     }
 }
