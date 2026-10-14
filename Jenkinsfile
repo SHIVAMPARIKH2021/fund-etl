@@ -100,7 +100,7 @@ pipeline {
                             string(credentialsId: 'doppler-personal-token', variable: 'DOPPLER_SECRET_TOKEN')
                         ]) {
                         // Pass secrets as environment variables to the shell process rather than interpolating into the command line
-                        sh script: '''
+                        sh script: """
                     set +x
                     echo "Executing fund-etl container remotely on Windows host..."
 
@@ -118,7 +118,7 @@ pipeline {
                             -e DB_SCHEMA='${DB_SCHEMA}' \
                             -e SEC_USER_AGENT='${SEC_USER_AGENT}' \
                             ${IMAGE_BASE_NAME}:${GIT_COMMIT_SHORT} ${runArgs}"
-                ''', returnStdout: false
+                """, returnStdout: false
                     }
                 }
             }
