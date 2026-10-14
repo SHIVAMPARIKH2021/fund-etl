@@ -19,13 +19,14 @@ pipeline {
         stage('Fetch Secrets from Doppler Cloud') {
             steps {
                 script {
+                    // Safe shell execution: uses single quotes to eliminate Groovy interpolation warning
                     def response = sh(
-                        script: """
+                        script: '''
                             curl -s --request GET \
                               --url "https://api.doppler.com/v3/configs/config/secrets/download?project=${DOPPLER_PROJECT}&config=${DOPPLER_CONFIG}&format=json" \
                               --header "accept: application/json" \
                               --header "authorization: Bearer ${DOPPLER_TOKEN}"
-                        """,
+                        ''',
                         returnStdout: true
                     ).trim()
 
@@ -50,9 +51,12 @@ pipeline {
         stage('Stream & Build Docker Image on Windows') {
             steps {
                 withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CREDS_ID, keyFileVariable: 'SSH_KEY')]) {
-                    sh """
-                        tar -czf - . | ssh -i "\$SSH_KEY" -o StrictHostKeyChecking=no ${WINDOWS_USER}@${WINDOWS_HOST} "docker build -t ${IMAGE_NAME} -"
-                    """
+                    sh '''
+                        tar -czf - . | ssh -i "$SSH_KEY" \
+                            -o StrictHostKeyChecking=no \
+                            -o ConnectTimeout=15 \
+                            ${WINDOWS_USER}@${WINDOWS_HOST} "docker build -t ${IMAGE_NAME} -"
+                    '''
                 }
             }
         }
@@ -64,12 +68,15 @@ pipeline {
 
                     withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CREDS_ID, keyFileVariable: 'SSH_KEY')]) {
                         sh """
-                            ssh -i "\$SSH_KEY" -o StrictHostKeyChecking=no ${WINDOWS_USER}@${WINDOWS_HOST} \
-                            "docker run --rm \
-                                --add-host=host.docker.internal:host-gateway \
-                                -e DATABASE_URL='${DATABASE_URL}' \
-                                -e SEC_USER_AGENT='${SEC_USER_AGENT}' \
-                                ${IMAGE_NAME} ${runArgs}"
+                            ssh -i "\$SSH_KEY" \
+                                -o StrictHostKeyChecking=no \
+                                -o ConnectTimeout=15 \
+                                ${WINDOWS_USER}@${WINDOWS_HOST} \
+                                "docker run --rm \
+                                    --add-host=host.docker.internal:host-gateway \
+                                    -e DATABASE_URL='${DATABASE_URL}' \
+                                    -e SEC_USER_AGENT='${SEC_USER_AGENT}' \
+                                    ${IMAGE_NAME} ${runArgs}"
                         """
                     }
                 }
