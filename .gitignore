@@ -20,3 +20,4 @@ wheels/
 coverage.xml
 htmlcov/
 .pytest_cache/
+.DS_Store
