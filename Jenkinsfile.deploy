@@ -1,0 +1,88 @@
+pipeline {
+    agent any
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
+    parameters {
+        booleanParam(name: 'FORCE_DOCKER_NO_CACHE', defaultValue: false, description: 'Force Docker to rebuild layers from scratch on Windows host')
+    }
+
+    environment {
+        DOPPLER_TOKEN   = credentials('doppler-personal-token')
+        DOPPLER_PROJECT = 'sec-pipeline'
+        DOPPLER_CONFIG  = 'prd'
+        SSH_CREDS_ID    = 'windows-laptop-ssh'
+        IMAGE_BASE_NAME = 'fund-etl'
+    }
+
+    stages {
+        stage('Fetch Secrets from Doppler Cloud') {
+            steps {
+                script {
+                    def response = sh(
+                        script: '''
+                            curl -s --request GET \
+                              --url "https://api.doppler.com/v3/configs/config/secrets/download?project=${DOPPLER_PROJECT}&config=${DOPPLER_CONFIG}&format=json" \
+                              --header "accept: application/json" \
+                              --header "authorization: Bearer ${DOPPLER_TOKEN}"
+                        ''',
+                        returnStdout: true
+                    ).trim()
+
+                    def secrets = readJSON text: response
+                    env.WINDOWS_HOST = secrets.WINDOWS_HOST
+                    env.WINDOWS_USER = secrets.WINDOWS_USER
+                    echo "Target Windows Host: ${env.WINDOWS_HOST}"
+                }
+            }
+        }
+
+        stage('Checkout & Commit Resolution') {
+            steps {
+                checkout scm
+                script {
+                    env.GIT_COMMIT_SHORT = sh(
+                        script: 'git rev-parse --short HEAD',
+                        returnStdout: true
+                    ).trim()
+                    echo "Building commit: ${env.GIT_COMMIT_SHORT}"
+                }
+            }
+        }
+
+        stage('Stream Context & Build Docker Image on Windows') {
+            steps {
+                script {
+                    def noCacheFlag = params.FORCE_DOCKER_NO_CACHE ? "--no-cache" : ""
+                    withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CREDS_ID, keyFileVariable: 'SSH_KEY')]) {
+                        sh """
+                            tar -czf - --exclude='.git' --exclude='.venv' --exclude='__pycache__' . | ssh -i "\$SSH_KEY" \
+                                -o StrictHostKeyChecking=no \
+                                -o ConnectTimeout=15 \
+                                ${WINDOWS_USER}@${WINDOWS_HOST} \
+                                "docker build ${noCacheFlag} \
+                                    -t ${IMAGE_BASE_NAME}:latest \
+                                    -t ${IMAGE_BASE_NAME}:${env.GIT_COMMIT_SHORT} -"
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+        success {
+            echo "fund-etl Docker image built successfully: ${IMAGE_BASE_NAME}:latest"
+        }
+        failure {
+            echo "fund-etl deployment failed. Review logs above."
+        }
+    }
+}
