@@ -5,6 +5,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "dataclasses>=0.8",
+    "datetime>=6.0",
     "httpx>=0.28.1",
     "pandas>=3.0.5",
     "pandera[polars]>=0.23.0",
@@ -15,6 +17,8 @@ dependencies = [
     "pydantic-core>=2.46.5",
     "pydantic-settings>=2.15.0",
     "python-dotenv>=1.2.3",
+    "typing>=3.10.0.0",
+    "uuid6>=2025.0.1",
 ]
 
 [project.scripts]
