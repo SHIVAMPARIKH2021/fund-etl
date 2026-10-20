@@ -1,16 +1,17 @@
 import argparse
 import logging
 import os
+from pathlib import Path
 import shutil
 import sys
 import traceback
 from urllib.parse import quote_plus
 
-import psycopg
 import pandera.polars as pa
 import polars as pl
+import psycopg
 
-from pathlib import Path
+from fund_etl.event.event_producer import FundEtlPayload, publish_completion_event
 from fund_etl.config import PROCESSED_DATA_DIR, RAW_DATA_DIR, settings
 from fund_etl.extract.extract import download_and_extract_quarter, scan_tsv_lazy, stream_batches
 from fund_etl.extract.extract_ticker import sync_mutual_fund_tickers
@@ -20,7 +21,7 @@ from fund_etl.load.pipeline_log import (
     mark_pipeline_success,
     start_pipeline_execution,
 )
-from fund_etl.sql.queries import get_or_create_quarter_config
+from fund_etl.sql.queries import get_file_ingestion_status, get_or_create_quarter_config
 from fund_etl.transform.transform import (
     transform_calculations,
     transform_labels,
@@ -29,7 +30,6 @@ from fund_etl.transform.transform import (
     transform_tags,
     transform_text_disclosures,
 )
-from fund_etl.sql.queries import get_file_ingestion_status
 
 logging.basicConfig(
     level=logging.INFO,
@@ -195,13 +195,47 @@ def run_pipeline(year: int, quarter: int, is_ticker_mf: bool, force: bool = Fals
         logger.info("Copying metadata to processed and cleaning up the raw data...")
         copy_metadata_and_clean_directory(RAW_DATA_DIR, PROCESSED_DATA_DIR)
 
+        # 11. Logging pipeline run
         mark_pipeline_success(log_id, total_records)
         logger.info("ETL pipeline complete for %dq%d. Ingested %d records.", year, quarter, total_records)
+
+        # 12. Publish completion event to RabbitMQ
+        rmq_host = settings.rabbitmq_host
+        rmq_port = settings.rabbitmq_port
+        success_payload = FundEtlPayload(
+            year=str(year),
+            quarter=str(quarter),
+            isForcedImport=force,
+            recordsProcessed=total_records,
+            status="SUCCESS",
+        )
+        logger.info("Publishing ETL completion event to RabbitMQ at %s:%d...", rmq_host, rmq_port)
+        publish_completion_event(success_payload, rmq_host=rmq_host, rmq_port=rmq_port)
+        logger.info("Completion event published successfully for %dq%d.", year, quarter)
 
     except Exception as e:
         error_details = traceback.format_exc()
         logger.error("Pipeline failed for %dq%d: %s", year, quarter, e)
         mark_pipeline_failed(log_id, error_details, partial_records=total_records)
+
+        # Publish failure event to RabbitMQ
+        try:
+            rmq_host = settings.rabbitmq_host
+            rmq_port = settings.rabbitmq_port
+            failure_payload = FundEtlPayload(
+                year=str(year),
+                quarter=str(quarter),
+                isForcedImport=force,
+                error=str(e),
+                recordsProcessed=total_records,
+                status="FAILED",
+            )
+            logger.info("Publishing ETL completion event to RabbitMQ at %s:%d...", rmq_host, rmq_port)
+            publish_completion_event(failure_payload, rmq_host=rmq_host, rmq_port=rmq_port)
+            logger.info("ETL failure event published to RabbitMQ for %dq%d.", year, quarter)
+        except Exception as pub_err:
+            logger.error("Failed to publish failure event to RabbitMQ: %s", pub_err)
+
         raise
 
 
@@ -339,7 +373,7 @@ if __name__ == "__main__":
         success = run_dry_run()
         sys.exit(0 if success else 1)
     else:
-        if not check_job_execution(args.year, args.quarter):
+        if not check_job_execution(args.year, args.quarter) or args.force:
             run_pipeline(year=args.year, quarter=args.quarter, is_ticker_mf=args.ticker, force=args.force)
         else:
             raise Exception(f"Successful Job Execution Found for Q{args.quarter} {args.year}.")

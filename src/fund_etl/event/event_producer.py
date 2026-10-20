@@ -1,54 +1,69 @@
-import json
-import uuid
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from dataclasses import dataclass, asdict
+import json
+from typing import Optional
 import pika
+import uuid6
+
 
 @dataclass
 class FundEtlPayload:
-    year: int
-    quarter: int
-    ticker: str = "True"
-    force: bool = False
+    year: str
+    quarter: str
+    isForcedImport: bool
+    error: str = ""
     recordsProcessed: int = 0
     status: str = "SUCCESS"
+
 
 @dataclass
 class EtlCompletedEvent:
     payload: FundEtlPayload
-    eventId: str = ""
-    eventType: str = "com.sec.pipeline.fund.etl.completed"
+    jobId: Optional[str] = None
+    timestamp: Optional[str] = None
+    correlationId: Optional[str] = None
     specVersion: str = "1.0"
+    eventType: str = "com.sec.pipeline.fund.etl.completed"
     source: str = "fund-etl:sec-edgar-worker"
-    correlationId: str = ""
-    timestamp: str = ""
 
     def __post_init__(self):
-        if not self.eventId:
-            self.eventId = str(uuid.uuid4())
+        if not self.jobId:
+            self.jobId = str(uuid6.uuid7())
         if not self.timestamp:
             self.timestamp = datetime.now(timezone.utc).isoformat()
         if not self.correlationId:
-            self.correlationId = f"corr-{self.payload.year}-Q{self.payload.quarter}-{uuid.uuid4().hex[:8]}"
+            self.correlationId = f"sec-ingest-{self.payload.year}-Q{self.payload.quarter}-{uuid6.uuid7().hex[:8]}"
 
-def publish_completion_event(payload: FundEtlPayload, rmq_host: str = "localhost"):
+
+def publish_completion_event(
+    payload: FundEtlPayload,
+    rmq_host: str,
+    rmq_port: int = 5672
+):
     event = EtlCompletedEvent(payload=payload)
     message_body = json.dumps(asdict(event))
 
-    connection = pika.BlockingConnection(pika.ConnectionParameters(host=rmq_host))
-    channel = connection.channel()
-
-    # Topic Exchange
-    channel.basic_publish(
-        exchange="etl.events.exchange",
-        routing_key="fund.etl.completed",
-        body=message_body.encode("utf-8"),
-        properties=pika.BasicProperties(
-            content_type="application/json",
-            delivery_mode=2,  # Persistent storage on disk
-            message_id=event.eventId,
-            correlation_id=event.correlationId,
-            timestamp=int(datetime.now(timezone.utc).timestamp())
-        )
+    parameters = pika.ConnectionParameters(
+        host=rmq_host,
+        port=rmq_port
     )
-    connection.close()
+    connection = pika.BlockingConnection(parameters)
+
+    try:
+        channel = connection.channel()
+        properties = pika.BasicProperties(
+            content_type="application/json",
+            delivery_mode=2,  # Persistent delivery
+            message_id=event.jobId,
+            correlation_id=event.correlationId,
+            timestamp=int(datetime.now(timezone.utc).timestamp()),
+        )
+
+        channel.basic_publish(
+            exchange="etl.events.exchange",
+            routing_key="fund.etl.completed",
+            body=message_body.encode("utf-8"),
+            properties=properties,
+        )
+    finally:
+        connection.close()

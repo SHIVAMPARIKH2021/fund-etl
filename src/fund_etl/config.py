@@ -52,6 +52,13 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # Reads WINDOWS_HOST injected by Doppler (fallback to RABBITMQ_HOST or localhost)
+    rabbitmq_host: str = Field(
+        default="localhost",
+        validation_alias="WINDOWS_HOST"
+    )
+    rabbitmq_port: int = Field(default=5672, validation_alias="RABBITMQ_PORT")
+
     @field_validator("database_url", mode="before")
     @classmethod
     def assemble_db_connection(cls, v: Optional[str], info) -> str:
