@@ -5,6 +5,8 @@ from typing import Optional
 import pika
 import uuid6
 
+from fund_etl.config import settings
+
 
 @dataclass
 class FundEtlPayload:
@@ -40,12 +42,17 @@ def publish_completion_event(
     rmq_host: str,
     rmq_port: int = 5672
 ):
+    rmq_user = settings.rabbitmq_user
+    rmq_password = settings.rabbitmq_password
+    credentials = pika.PlainCredentials(rmq_user, rmq_password)
     event = EtlCompletedEvent(payload=payload)
     message_body = json.dumps(asdict(event))
 
     parameters = pika.ConnectionParameters(
         host=rmq_host,
-        port=rmq_port
+        port=rmq_port,
+        virtual_host="/",
+        credentials=credentials
     )
     connection = pika.BlockingConnection(parameters)
 
