@@ -9,6 +9,7 @@ pipeline {
 
     parameters {
         booleanParam(name: 'DRY_RUN', defaultValue: false, description: 'Verify database and SEC endpoint connectivity without writes')
+        booleanParam(name: 'FORCE', defaultValue: false, description: 'Force re-download and re-process even if previously ingested')
         string(name: 'TICKER', defaultValue: 'True', description: 'Fund ticker symbol flag or value')
         choice(name: 'FILING_YEAR', choices: ['2026', '2025', '2024', '2023'], description: 'Target filing year')
         choice(name: 'FILING_QUARTER', choices: ['1', '2', '3', '4'], description: 'Target filing quarter')
@@ -48,6 +49,8 @@ pipeline {
                     env.DB_PORT         = secrets.DB_PORT ?: '5432'
                     env.DB_NAME         = secrets.DB_NAME ?: 'funds'
                     env.DB_SCHEMA       = secrets.DB_SCHEMA ?: 'sec_financials'
+                    env.RABBITMQ_HOST   = secrets.RABBITMQ_HOST ?: secrets.WINDOWS_HOST ?: 'host.docker.internal'
+                    env.RABBITMQ_PORT   = secrets.RABBITMQ_PORT ?: '5672'
                 }
             }
         }
@@ -57,7 +60,12 @@ pipeline {
                 script {
                     def targetImage = "${IMAGE_BASE_NAME}:${params.IMAGE_TAG}"
                     def baseArgs = "--year ${params.FILING_YEAR} --quarter ${params.FILING_QUARTER} --ticker ${params.TICKER}"
-                    def runArgs  = params.DRY_RUN ? "${baseArgs} --dry-run" : baseArgs
+
+                    if (params.FORCE) {
+                        baseArgs = "${baseArgs} --force"
+                    }
+
+                    def runArgs = params.DRY_RUN ? "${baseArgs} --dry-run" : baseArgs
 
                     echo "Executing ${targetImage} with args: ${runArgs}"
 
@@ -77,6 +85,8 @@ pipeline {
                                     -e DB_NAME='${DB_NAME}' \
                                     -e DB_SCHEMA='${DB_SCHEMA}' \
                                     -e SEC_USER_AGENT='${SEC_USER_AGENT}' \
+                                    -e WINDOWS_HOST='${RABBITMQ_HOST}' \
+                                    -e RABBITMQ_PORT='${RABBITMQ_PORT}' \
                                     ${targetImage} ${runArgs}"
                         """
                     }
@@ -90,7 +100,7 @@ pipeline {
             cleanWs()
         }
         success {
-            echo "fund-etl run completed successfully for ${params.FILING_YEAR} Q${params.FILING_QUARTER}."
+            echo "fund-etl run completed successfully for ${params.FILING_YEAR} Q${params.FILING_QUARTER} (Force=${params.FORCE})."
         }
         failure {
             echo "fund-etl run failed. Review logs above."
