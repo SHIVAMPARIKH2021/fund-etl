@@ -58,6 +58,8 @@ class Settings(BaseSettings):
         validation_alias="WINDOWS_HOST"
     )
     rabbitmq_port: int = Field(default=5672, validation_alias="RABBITMQ_PORT")
+    rabbitmq_user: str = Field(default="guest", validation_alias="RABBITMQ_DEFAULT_USER")
+    rabbitmq_password: str = Field(default="guest", validation_alias="RABBITMQ_DEFAULT_PASSWORD")
 
     @field_validator("database_url", mode="before")
     @classmethod

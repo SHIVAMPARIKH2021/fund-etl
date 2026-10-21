@@ -51,6 +51,8 @@ pipeline {
                     env.DB_SCHEMA       = secrets.DB_SCHEMA ?: 'sec_financials'
                     env.RABBITMQ_HOST   = secrets.RABBITMQ_HOST ?: secrets.WINDOWS_HOST ?: 'host.docker.internal'
                     env.RABBITMQ_PORT   = secrets.RABBITMQ_PORT ?: '5672'
+                    env.RABBITMQ_DEFAULT_USER = secrets.RABBITMQ_DEFAULT_USER
+                    env.RABBITMQ_DEFAULT_PASSWORD = secrets.RABBITMQ_DEFAULT_PASSWORD
                 }
             }
         }
@@ -87,6 +89,8 @@ pipeline {
                                     -e SEC_USER_AGENT='${SEC_USER_AGENT}' \
                                     -e WINDOWS_HOST='${RABBITMQ_HOST}' \
                                     -e RABBITMQ_PORT='${RABBITMQ_PORT}' \
+                                    -e RABBITMQ_DEFAULT_USER='${RABBITMQ_DEFAULT_USER}' \
+                                    -e RABBITMQ_DEFAULT_PASSWORD='${RABBITMQ_DEFAULT_PASSWORD}' \
                                     ${targetImage} ${runArgs}"
                         """
                     }
